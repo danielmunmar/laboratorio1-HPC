@@ -26,12 +26,12 @@ int main(int argc, char *argv[]){
     PPM_IMG img_ibuf_c;
     
     printf("Running contrast enhancement for gray-scale images.\n");
-    img_ibuf_g = read_pgm("in.pgm");
+    img_ibuf_g = read_pgm("images/in.pgm");
     run_cpu_gray_test(img_ibuf_g);
     free_pgm(img_ibuf_g);
     
     printf("Running contrast enhancement for color images.\n");
-    img_ibuf_c = read_ppm("in.ppm");
+    img_ibuf_c = read_ppm("images/in.ppm");
     run_cpu_color_test(img_ibuf_c);
     free_ppm(img_ibuf_c);
     
@@ -46,15 +46,20 @@ void run_cpu_color_test(PPM_IMG img_in)
     
     printf("Starting CPU processing...\n");
     
+    double tstart = MPI_Wtime();
     img_obuf_hsl = contrast_enhancement_c_hsl(img_in);
-    printf("HSL processing time: %f (ms)\n", 0.0f /* TIMER */ );
-    
-    write_ppm(img_obuf_hsl, "out_hsl.ppm");
+    double tfinish = MPI_Wtime();
 
-    img_obuf_yuv = contrast_enhancement_c_yuv(img_in);
-    printf("YUV processing time: %f (ms)\n", 0.0f /* TIMER */);
+    printf("HSL processing time: %f (ms)\n", (tfinish - tstart)*1000.0 /* TIMER */ );
     
-    write_ppm(img_obuf_yuv, "out_yuv.ppm");
+    write_ppm(img_obuf_hsl, "images/out_hsl_secuential.ppm");
+
+    tstart = MPI_Wtime();
+    img_obuf_yuv = contrast_enhancement_c_yuv(img_in);
+    tfinish = MPI_Wtime();
+    printf("YUV processing time: %f (ms)\n", (tfinish - tstart)*1000.0 /* TIMER */);
+    
+    write_ppm(img_obuf_yuv, "images/out_yuv_secuential.ppm");
     
     free_ppm(img_obuf_hsl);
     free_ppm(img_obuf_yuv);
@@ -70,10 +75,12 @@ void run_cpu_gray_test(PGM_IMG img_in)
     
     printf("Starting CPU processing...\n");
     
+    double tstart = MPI_Wtime();
     img_obuf = contrast_enhancement_g(img_in);
-    printf("Processing time: %f (ms)\n", 0.0f /* TIMER */ );
+    double tfinish = MPI_Wtime();
+    printf("Processing time: %f (ms)\n", (tfinish - tstart)*1000.0 /* TIMER */ );
     
-    write_pgm(img_obuf, "out.pgm");
+    write_pgm(img_obuf, "images/out_secuential.pgm");
     free_pgm(img_obuf);
 }
 
@@ -190,4 +197,3 @@ void free_pgm(PGM_IMG img)
 {
     free(img.img);
 }
-
