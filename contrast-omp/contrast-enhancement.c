@@ -1,6 +1,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
+#include <omp.h>
 #include "hist-equ.h"
 
 PGM_IMG contrast_enhancement_g(PGM_IMG img_in)
@@ -17,6 +18,7 @@ PGM_IMG contrast_enhancement_g(PGM_IMG img_in)
     return result;
 }
 
+// Every call to histogram()/histogram_equalization() is parallel already
 PPM_IMG contrast_enhancement_c_rgb(PPM_IMG img_in)
 {
     PPM_IMG result;
@@ -89,22 +91,23 @@ PPM_IMG contrast_enhancement_c_hsl(PPM_IMG img_in)
 }
 
 
-//Convert RGB to HSL, assume R,G,B in [0, 255]
-//Output H, S in [0.0, 1.0] and L in [0, 255]
+// Convert RGB to HSL, assume R,G,B in [0, 255]
+// Output H, S in [0.0, 1.0] and L in [0, 255]
+// Every pixel is independent: all temporal variables are declared inside the loop, so they are private to each thread
 HSL_IMG rgb2hsl(PPM_IMG img_in)
 {
     int i;
-    float H, S, L;
-    HSL_IMG img_out;// = (HSL_IMG *)malloc(sizeof(HSL_IMG));
+    int n = img_in.w*img_in.h;
+    HSL_IMG img_out;
     img_out.width  = img_in.w;
     img_out.height = img_in.h;
-    img_out.h = (float *)malloc(img_in.w * img_in.h * sizeof(float));
-    img_out.s = (float *)malloc(img_in.w * img_in.h * sizeof(float));
-    img_out.l = (unsigned char *)malloc(img_in.w * img_in.h * sizeof(unsigned char));
+    img_out.h = (float *)malloc(n * sizeof(float));
+    img_out.s = (float *)malloc(n * sizeof(float));
+    img_out.l = (unsigned char *)malloc(n * sizeof(unsigned char));
     
-    #pragma omp parallel for private(H, S, L)
-    for(i = 0; i < img_in.w*img_in.h; i ++){
-        
+    #pragma omp parallel for schedule(static)
+    for(i = 0; i < n; i ++){
+        float H, S, L;
         float var_r = ( (float)img_in.img_r[i]/255 );//Convert RGB to [0,1]
         float var_g = ( (float)img_in.img_g[i]/255 );
         float var_b = ( (float)img_in.img_b[i]/255 );
@@ -172,16 +175,17 @@ float Hue_2_RGB( float v1, float v2, float vH )             //Function Hue_2_RGB
 PPM_IMG hsl2rgb(HSL_IMG img_in)
 {
     int i;
+    int n = img_in.width*img_in.height;
     PPM_IMG result;
     
     result.w = img_in.width;
     result.h = img_in.height;
-    result.img_r = (unsigned char *)malloc(result.w * result.h * sizeof(unsigned char));
-    result.img_g = (unsigned char *)malloc(result.w * result.h * sizeof(unsigned char));
-    result.img_b = (unsigned char *)malloc(result.w * result.h * sizeof(unsigned char));
+    result.img_r = (unsigned char *)malloc(n * sizeof(unsigned char));
+    result.img_g = (unsigned char *)malloc(n * sizeof(unsigned char));
+    result.img_b = (unsigned char *)malloc(n * sizeof(unsigned char));
     
-    #pragma omp parallel for
-    for(i = 0; i < img_in.width*img_in.height; i ++){
+    #pragma omp parallel for schedule(static)
+    for(i = 0; i < n; i ++){
         float H = img_in.h[i];
         float S = img_in.s[i];
         float L = img_in.l[i]/255.0f;
@@ -220,25 +224,27 @@ PPM_IMG hsl2rgb(HSL_IMG img_in)
 YUV_IMG rgb2yuv(PPM_IMG img_in)
 {
     YUV_IMG img_out;
-    int i;//, j;
-    unsigned char r, g, b;
-    unsigned char y, cb, cr;
+    int i;
+    int n = img_in.w*img_in.h;
     
     img_out.w = img_in.w;
     img_out.h = img_in.h;
-    img_out.img_y = (unsigned char *)malloc(sizeof(unsigned char)*img_out.w*img_out.h);
-    img_out.img_u = (unsigned char *)malloc(sizeof(unsigned char)*img_out.w*img_out.h);
-    img_out.img_v = (unsigned char *)malloc(sizeof(unsigned char)*img_out.w*img_out.h);
+    img_out.img_y = (unsigned char *)malloc(sizeof(unsigned char)*n);
+    img_out.img_u = (unsigned char *)malloc(sizeof(unsigned char)*n);
+    img_out.img_v = (unsigned char *)malloc(sizeof(unsigned char)*n);
 
-    #pragma omp parallel for private(r, g, b, y, cb, cr)
-    for(i = 0; i < img_out.w*img_out.h; i ++){
-        r = img_in.img_r[i];
-        g = img_in.img_g[i];
-        b = img_in.img_b[i];
+    #pragma omp parallel for schedule(static)
+    for(i = 0; i < n; i ++){
+        // r,g,b,y,cb,cr were shared variables in the secuential version
+        // (race condition if parallelized as is): they are declared
+        // inside the loop to make them private.
+        unsigned char r = img_in.img_r[i];
+        unsigned char g = img_in.img_g[i];
+        unsigned char b = img_in.img_b[i];
         
-        y  = (unsigned char)( 0.299*r + 0.587*g +  0.114*b);
-        cb = (unsigned char)(-0.169*r - 0.331*g +  0.499*b + 128);
-        cr = (unsigned char)( 0.499*r - 0.418*g - 0.0813*b + 128);
+        unsigned char y  = (unsigned char)( 0.299*r + 0.587*g +  0.114*b);
+        unsigned char cb = (unsigned char)(-0.169*r - 0.331*g +  0.499*b + 128);
+        unsigned char cr = (unsigned char)( 0.499*r - 0.418*g - 0.0813*b + 128);
         
         img_out.img_y[i] = y;
         img_out.img_u[i] = cb;
@@ -263,25 +269,24 @@ PPM_IMG yuv2rgb(YUV_IMG img_in)
 {
     PPM_IMG img_out;
     int i;
-    int  rt,gt,bt;
-    int y, cb, cr;
-    
+    int n = img_in.w*img_in.h;
     
     img_out.w = img_in.w;
     img_out.h = img_in.h;
-    img_out.img_r = (unsigned char *)malloc(sizeof(unsigned char)*img_out.w*img_out.h);
-    img_out.img_g = (unsigned char *)malloc(sizeof(unsigned char)*img_out.w*img_out.h);
-    img_out.img_b = (unsigned char *)malloc(sizeof(unsigned char)*img_out.w*img_out.h);
+    img_out.img_r = (unsigned char *)malloc(sizeof(unsigned char)*n);
+    img_out.img_g = (unsigned char *)malloc(sizeof(unsigned char)*n);
+    img_out.img_b = (unsigned char *)malloc(sizeof(unsigned char)*n);
 
-    #pragma omp parallel for private(y, cb, cr, rt, gt, bt)
-    for(i = 0; i < img_out.w*img_out.h; i ++){
-        y  = (int)img_in.img_y[i];
-        cb = (int)img_in.img_u[i] - 128;
-        cr = (int)img_in.img_v[i] - 128;
+    #pragma omp parallel for schedule(static)
+    for(i = 0; i < n; i ++){
+        // private variables (declared inside the loop)
+        int y  = (int)img_in.img_y[i];
+        int cb = (int)img_in.img_u[i] - 128;
+        int cr = (int)img_in.img_v[i] - 128;
         
-        rt  = (int)( y + 1.402*cr);
-        gt  = (int)( y - 0.344*cb - 0.714*cr);
-        bt  = (int)( y + 1.772*cb);
+        int rt  = (int)( y + 1.402*cr);
+        int gt  = (int)( y - 0.344*cb - 0.714*cr);
+        int bt  = (int)( y + 1.772*cb);
 
         img_out.img_r[i] = clip_rgb(rt);
         img_out.img_g[i] = clip_rgb(gt);
