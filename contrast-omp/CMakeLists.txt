@@ -5,9 +5,6 @@ project(
   VERSION 1.0
   LANGUAGES C)
 
-
-find_package(MPI)
-
 find_package(OpenMP)
 if (OPENMP_FOUND)
     set (CMAKE_C_FLAGS "${CMAKE_C_FLAGS} ${OpenMP_C_FLAGS}")
@@ -15,8 +12,4 @@ if (OPENMP_FOUND)
     set (CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} ${OpenMP_EXE_LINKER_FLAGS}")
 endif()
 
-include_directories(SYSTEM ${MPI_INCLUDE_PATH})
-
 add_executable(contrast contrast-enhancement.c histogram-equalization.c  contrast.c)
-
-target_link_libraries(contrast ${MPI_C_LIBRARIES})
